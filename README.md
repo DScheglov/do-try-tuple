@@ -7,12 +7,12 @@ Catches errors and rejected promises, returns tuple with error and value.
 - [Async Usage](#async-usage)
 - [API](#api)
   - [`doTry` function](#dotry-function)
+  - [`safe` promise wrapper](#safe-promise-wrapper)
+  - [`Failure` type](#failure-type)
+  - [`Success` type](#success-type)
   - [`ErrValueTuple` type](#errvaluetuple-type)
-  - [`UnknownError` type](#unknownerror-type)
-  - [`DoTryError` class](#dotryerror-class)
-  - [`DoTryErrorCode` type and constants](#dotryerrorcode-type-and-constants)
-- [Important! Discriminating `ErrValueTuple`](#important-discriminating-errvaluetuple)
-  - [Do not use `if (error)` or `if (!error)` to discriminate the tuple](#do-not-use-if-error-or-if-error-to-discriminate-the-tuple)
+  - [`failure` and `success` factory functions](#failure-and-success-factory-functions)
+  - [`isFailure` and `isSuccess` type guards](#isfailure-and-issuccess-type-guards)
 - [Using `doTry().then()`](#using-dotrythen)
 
 ## Installation
@@ -32,9 +32,9 @@ function div(a: number, b: number): number {
   throw new Error('Indeterminate Form');
 }
 
-const [errX, x] = doTry(() => div(4, 2));
+const [isDivOk, errX, x] = doTry(() => div(4, 2));
 
-if (errX == null) {
+if (isDivOk) {
   const doubleX = x * 2;
   console.log('doubleX:', doubleX);
 }
@@ -45,9 +45,23 @@ if (errX == null) {
 ```typescript
 import doTry from 'do-try-tuple';
 
-const [error, users] = await doTry(() => fetchUsers());
+const [areUsersFetched, error, users] = await doTry(() => fetchUsers());
 
-if (error != null) {
+if (!areUsersFetched) {
+  console.error('Failed to fetch users:', error);
+} else {
+  console.log('Users:', users);
+}
+```
+
+or
+
+```typescript
+import { safe } from 'do-try-tuple';
+
+const [areUsersFetched, error, users] = await safe(fetchUsers());
+
+if (!areUsersFetched) {
   console.error('Failed to fetch users:', error);
 } else {
   console.log('Users:', users);
@@ -61,20 +75,18 @@ The library exports:
 - `doTry` function (default export)
 - `safe` promise wrapper to make it resolving to `ErrValueTuple`
 - `Failure`, `Success` and `ErrValueTuple` types
-- `UnknownError` type
-- `success` and `failure` factory functions
-- `DoTryError` class
-- `DoTryErrorCode` type and constants
+- `failure` and `success` factory functions
+- `isFailure` and `isSuccess` type guards
 
 ### `doTry` function
 
 takes a function that may throw an error or return a promise that may be rejected.
 
 ```typescript
-function doTry(fn: () => never): [UnknownError, never];
-function doTry(fn: () => Promise<never>): Promise<[UnknownError, never]>;
-function doTry<T>(fn: () => T): ErrValueTuple<T>;
-function doTry<T>(fn: () => Promise<T>): Promise<ErrValueTuple<T>>;
+function (fn: () => never): readonly [false, unknown, never];
+function (fn: () => Promise<never>): Promise<readonly [false, unknown, never]>;
+function <T>(fn: () => Promise<T>): Promise<ErrValueTuple<T>>;
+function <T>(fn: () => T): ErrValueTuple<T>;
 ```
 
 ### `safe` promise wrapper
@@ -90,7 +102,7 @@ It could be useful when you need to handle the promise rejection synchronously:
 ```typescript
 import { safe } from 'do-try-tuple';
 
-const [error, users] = await safe(fetchUsers());
+const [areUsersFatched, error, users] = await safe(fetchUsers());
 ```
 
 ### `Failure` type
@@ -98,53 +110,37 @@ const [error, users] = await safe(fetchUsers());
 is a tuple representing the error case:
 
 ```typescript
-export type Failure = readonly [UnknownError, undefined];
+export type Failure<E = unknown> = readonly [ok: false, error: E, value: undefined];
 ```
+
+The library respects the same motivation as caused introduction
+[useUnknownInCatchVariables](https://www.typescriptlang.org/tsconfig/#useUnknownInCatchVariables)
+compiler option in TypeScript:
 
 ### `Success` type
 
 is a tuple representing the success case:
 
 ```typescript
-export type Success<T> = readonly [undefined, T];
+export type Success<T> = readonly [ok: true, error: undefined, value: T];
 ```
 
 ### `ErrValueTuple` type
 
-is a union of `Failure` and `Success<T>`.
+is a union of `Failure<E>` and `Success<T>`.
 
 ```typescript
-export type ErrValueTuple<T> = Failure | Success<T>;
+export type ErrValueTuple<T, E = unknown> = Failure<E> | Success<T>;
 ```
 
-### `UnknownError` type
-
-type represents an unknown, non-nullish value caught by `doTry` function.
-
-```typescript
-export type UnknownError = NonNullable<unknown>; // actually it is a {} type
-```
-
-In case when `doTry` catches `null` or `undefined` value, it returns a `DoTryError`
-as the first item of the tuple.
-
-The library respects the same motivation as caused introduction
-[useUnknownInCatchVariables](https://www.typescriptlang.org/tsconfig/#useUnknownInCatchVariables)
-compiler option in TypeScript:
-
-- we cannot be sure that all thrown errors are instances of `Error` class
-
-### `success` and `failure` factory functions
+### `failure` and `success` factory functions
 
 These functions allow to create `ErrValueTuple` instances:
 
 ```typescript
+export function failure<E>(error: E): Failure<E>;
 export function success<T>(value: T): Success<T>;
-export function failure(error: unknown): Failure;
 ```
-
-The `failure` functions checks if `error` is not null or undefined, otherwise it throws
-creates a `DoTryError` instance with `ERR_NULLISH_VALUE_CAUGHT` code and `error` as a cause.
 
 It could be useful in tests:
 
@@ -158,83 +154,34 @@ test('div', () => {
 });
 ```
 
-### `DoTryError` class
+### `isFailure` and `isSuccess` type guards
 
-is an error class that is returned when `doTry` cannot comply to the `ErrValueTuple` contract:
-
-- when the `fn` argument is not a function
-- when the caught error is `null` or `undefined`
+These functions allow to check if the value is `Failure` or `Success`:
 
 ```typescript
-export class DoTryError extends Error {
-  constructor(code: DoTryErrorCode, cause: unknown);
+export function isFailure(value: ErrValueTuple<unknown>): value is Failure;
+export function isSuccess(value: ErrValueTuple<unknown>): value is Success<unknown>;
+```
+
+It allows to check the result and narrow the type without destructuring:
+
+```typescript
+
+class DivError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DivError';
+  }
+}
+
+function divWithTypeError(a: number, b: number): ErrValueTuple<number, DivError> {
+  const result = doTry(() => div(a, b));
+
+  if (isSuccess(result)) return result;
+  return failure(new DivError('Failed to divide'));
 }
 ```
 
-**Fields**:
-
-| Field     | Type             | Description                                           |
-| --------- | ---------------- | ----------------------------------------------------- |
-| `message` | `string`         | error message                                         |
-| `code`    | `DoTryErrorCode` | error code                                            |
-| `cause`   | `unknown`        | caught error (`null` or `undefined`) or `fn` argument |
-
-### `DoTryErrorCode` type and constants
-
-is an union of string literal error codes that `DoTryError` class uses.
-
-| Code / Instance Of                                                             | Description                                                           | Cause        |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ------------ |
-| code: `'ERR_NOT_A_FUNCTION'`<br />class: `DoTryError.NotAFunction`             | `fn` argument is not a function                                       | `fn`         |
-| code: `'ERR_NULLISH_VALUE_CAUGHT'`<br />class: `DoTryError.NullishValueCaught` | `doTry` caught `null` or `undefined` value                            | caught value |
-
-## Important! Discriminating `ErrValueTuple`
-
-To discriminate the `ErrValueTuple` type, you should compare the first element of the tuple to
-`undefined`. The most concise way to do that is to use the `!= null` expression:
-
-```typescript
-const [err, value] = doTry(() => someFn(...someArgs));
-
-if (err != null) {
-  // handle error
-  return;
-}
-
-// handle value
-```
-
-The most performant way is to use strict equality comparison:
-
-```typescript
-const [err, value] = doTry(() => someFn(...someArgs));
-
-if (err !== undefined) {
-  // handle error
-  return;
-}
-
-// handle value
-```
-
-### Do not use `if (error)` or `if (!error)` to discriminate the tuple
-
-The `if (error)` expression will not work as expected in `else` block, because `if` casts
-`err` to `boolean` type and narrows its type in `then`-branch correctly, but in `else`-branch
-the type of `err` is still `UnknownError | undefined`, so `TypeScript` cannot discriminate
-the `ErrValueTuple` type correctly:
-
-```typescript
-const [error, value] = doTry(() => someFn(...someArgs));
-
-if (error) {
-  // handle error
-  return;
-}
-
-// value is still of type `T | undefined`
-// error is still of type `UnknownError | undefined`
-```
 
 ## Using `doTry().then()`
 

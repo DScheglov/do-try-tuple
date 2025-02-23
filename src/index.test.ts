@@ -1,19 +1,21 @@
 import { describe, expect, it } from '@jest/globals';
 import { Expect, Equal } from '@type-challenges/utils';
 import doTry, {
+  Failure,
+  failure,
+  isFailure,
+  isSuccess,
   safe,
-  ErrValueTuple,
-  UnknownError,
-  ERR_NOT_A_FUNCTION,
-  ERR_NULLISH_VALUE_CAUGHT,
+  Success,
+  success,
+  type ErrValueTuple,
 } from './index';
-import DoTryError from './DoTryError';
 
 describe('doTry', () => {
   it('handles synchronous functions', () => {
     const fn = () => 42;
     const result: ErrValueTuple<number> = doTry(fn);
-    expect(result).toEqual([undefined, 42]);
+    expect(result).toEqual([true, undefined, 42]);
   });
 
   it('correctly types the result of synchronous functions', () => {
@@ -26,18 +28,20 @@ describe('doTry', () => {
     const result = doTry(() => {
       throw new Error('Something went wrong');
     });
-    const check: Expect<Equal<typeof result, Readonly<[UnknownError, never]>>> =
-      true;
+    const check: Expect<
+      Equal<typeof result, Readonly<[false, unknown, never]>>
+    > = true;
     expect(check).toBeTruthy();
   });
 
-  it('correctly types the [error, value] of synchronous functions that never returns', () => {
-    const [error, value] = doTry(() => {
+  it('correctly types the [ok, error, value] of synchronous functions that never returns', () => {
+    const [ok, error, value] = doTry(() => {
       throw new Error('Something went wrong');
     });
-    const checkErr: Expect<Equal<typeof error, UnknownError>> = true;
+    const checkErr: Expect<Equal<typeof error, unknown>> = true;
     const checkValue: Expect<Equal<typeof value, never>> = true;
 
+    expect(ok).toBeFalsy();
     expect(checkErr).toBeTruthy();
     expect(checkValue).toBeTruthy();
   });
@@ -47,38 +51,39 @@ describe('doTry', () => {
       throw new Error('Something went wrong');
     });
     const check: Expect<
-      Equal<typeof result, Promise<Readonly<[UnknownError, never]>>>
+      Equal<typeof result, Promise<Readonly<[false, unknown, never]>>>
     > = true;
     expect(check).toBeTruthy();
   });
 
-  it('correctly types the [error, value] of asynchronous functions that never returns', async () => {
-    expect.assertions(2);
+  it('correctly types the [ok, error, value] of asynchronous functions that never returns', async () => {
+    expect.assertions(3);
 
-    const [error, value] = await doTry(async () => {
+    const [ok, error, value] = await doTry(async () => {
       throw new Error('Something went wrong');
     });
 
-    const checkErr: Expect<Equal<typeof error, UnknownError>> = true;
+    const checkErr: Expect<Equal<typeof error, unknown>> = true;
     const checkValue: Expect<Equal<typeof value, never>> = true;
 
+    expect(ok).toBeFalsy();
     expect(checkErr).toBeTruthy();
     expect(checkValue).toBeTruthy();
   });
 
   it('correctly discriminates the result of synchronous functions (ok case)', () => {
     expect.assertions(2);
-    const [error, value] = doTry(() => 42);
+    const [ok, error, value] = doTry(() => 42);
 
-    if (error != null) {
+    if (!ok) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const check: Expect<Equal<typeof error, UnknownError>> = true;
+      const check: Expect<Equal<typeof error, unknown>> = true;
     } else {
       const check: Expect<Equal<typeof value, number>> = true;
       expect(check).toBeTruthy();
     }
 
-    if (error == null) {
+    if (ok) {
       const check: Expect<Equal<typeof value, number>> = true;
       expect(check).toBeTruthy();
     }
@@ -86,37 +91,37 @@ describe('doTry', () => {
 
   it('correctly discriminates the result of synchronous functions (error case)', () => {
     expect.assertions(2);
-    const [error, value] = doTry((): number => {
+    const [ok, error, value] = doTry((): number => {
       throw new Error('Something went wrong');
     });
 
-    if (error != null) {
-      const check: Expect<Equal<typeof error, UnknownError>> = true;
+    if (!ok) {
+      const check: Expect<Equal<typeof error, unknown>> = true;
       expect(check).toBeTruthy();
     }
 
-    if (error == null) {
+    if (ok) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const check: Expect<Equal<typeof value, number>> = true;
     } else {
-      const check: Expect<Equal<typeof error, UnknownError>> = true;
+      const check: Expect<Equal<typeof error, unknown>> = true;
       expect(check).toBeTruthy();
     }
   });
 
   it('correctly discriminates the result when function intentionally returns undefined', () => {
     expect.assertions(2);
-    const [error, value] = doTry(() => undefined);
+    const [ok, error, value] = doTry(() => undefined);
 
-    if (error != null) {
+    if (!ok) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const check: Expect<Equal<typeof error, UnknownError>> = true;
+      const check: Expect<Equal<typeof error, unknown>> = true;
     } else {
       const check: Expect<Equal<typeof value, undefined>> = true;
       expect(check).toBeTruthy();
     }
 
-    if (error == null) {
+    if (ok) {
       const check: Expect<Equal<typeof value, undefined>> = true;
       expect(check).toBeTruthy();
     }
@@ -124,17 +129,17 @@ describe('doTry', () => {
 
   it('correctly discriminates the result when function intentionally returns T | undefined', () => {
     expect.assertions(2);
-    const [error, value] = doTry((): number | undefined => 42);
+    const [ok, error, value] = doTry((): number | undefined => 42);
 
-    if (error != null) {
+    if (!ok) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const check: Expect<Equal<typeof error, UnknownError>> = true;
+      const check: Expect<Equal<typeof error, unknown>> = true;
     } else {
       const check: Expect<Equal<typeof value, number | undefined>> = true;
       expect(check).toBeTruthy();
     }
 
-    if (error == null) {
+    if (ok) {
       const check: Expect<Equal<typeof value, number | undefined>> = true;
       expect(check).toBeTruthy();
     }
@@ -145,8 +150,9 @@ describe('doTry', () => {
       throw new Error('Something went wrong');
     };
     const result: ErrValueTuple<number> = doTry(fn);
-    expect(result[0]).toBeInstanceOf(Error);
-    expect(result[1]).toBeUndefined();
+    expect(result[0]).toBeFalsy();
+    expect(result[1]).toBeInstanceOf(Error);
+    expect(result[2]).toBeUndefined();
   });
 
   it('handles asynchronous functions', async () => {
@@ -158,7 +164,7 @@ describe('doTry', () => {
       });
     };
     const result: Promise<ErrValueTuple<number>> = doTry(fn);
-    await expect(result).resolves.toEqual([undefined, 42]);
+    await expect(result).resolves.toEqual([true, undefined, 42]);
   });
 
   it('handles asynchronous functions that reject', async () => {
@@ -171,54 +177,16 @@ describe('doTry', () => {
     };
     const result: Promise<ErrValueTuple<number>> = doTry(fn);
     await expect(result).resolves.toEqual([
+      false,
       new Error('Something went wrong'),
       undefined,
     ]);
   });
 
-  it('returns a DoTryError if not a function passed as argument', () => {
-    const [error]: ErrValueTuple<unknown> = doTry('not a function' as any);
-    expect(error).toEqual(new DoTryError(ERR_NOT_A_FUNCTION, 'not a function'));
-  });
-
-  it('returns a DoTryError if null has been thrown', () => {
-    const fn = () => {
-      throw null;
-    };
-    const [error]: ErrValueTuple<unknown> = doTry(fn);
-    expect(error).toEqual(new DoTryError(ERR_NULLISH_VALUE_CAUGHT, null));
-  });
-
-  it('returns a DoTryError if undefined has been thrown', () => {
-    const fn = () => {
-      throw undefined;
-    };
-    const [error]: ErrValueTuple<unknown> = doTry(fn);
-    expect(error).toEqual(new DoTryError(ERR_NULLISH_VALUE_CAUGHT, undefined));
-  });
-
-  it('returns a DoTryError if promise has been rejected with null', () => {
-    const fn = async () => {
-      return new Promise<unknown>((_, reject) => {
-        reject(null);
-      });
-    };
-    const result = doTry(fn);
-    return expect(result).resolves.toEqual([
-      new DoTryError(ERR_NULLISH_VALUE_CAUGHT, null),
-    ]);
-  });
-
-  it('returns a DoTryError if promise has been rejected with undefined', () => {
-    const fn = async () => {
-      return new Promise<unknown>((_, reject) => {
-        reject(undefined);
-      });
-    };
-    const result = doTry(fn);
-    return expect(result).resolves.toEqual([
-      new DoTryError(ERR_NULLISH_VALUE_CAUGHT, undefined),
-    ]);
+  it('returns an Error if not a function passed as argument', () => {
+    const [ok, error]: ErrValueTuple<unknown> = doTry('not a function' as any);
+    expect(ok).toBeFalsy();
+    expect(error).toEqual(new Error('fn is not a function'));
   });
 
   it('works for example', () => {
@@ -230,20 +198,23 @@ describe('doTry', () => {
       throw new Error('Indeterminate Form');
     }
 
-    const [errX, x] = doTry(() => div(4, 2));
+    const [ok, , x] = doTry(() => div(4, 2));
 
-    if (errX == null) {
+    if (ok) {
       const doubleX = x * 2;
       expect(doubleX).toBe(4);
     }
   });
 
   it('does not require discriminating the error if function never returns', () => {
-    const [error, value] = doTry(() => {
+    const [ok, error, value] = doTry(() => {
       throw new Error('Something went wrong');
     });
 
-    const checkErr: Expect<Equal<typeof error, UnknownError>> = true;
+    const checkOk: Expect<Equal<typeof ok, false>> = true;
+    expect(checkOk).toBeTruthy();
+
+    const checkErr: Expect<Equal<typeof error, unknown>> = true;
     expect(checkErr).toBeTruthy();
 
     const checkValue: Expect<Equal<typeof value, never>> = true;
@@ -256,7 +227,7 @@ describe('doTry', () => {
     };
 
     expect(() =>
-      doTry(fn).then(([error, value]) => [
+      doTry(fn).then(([, error, value]) => [
         error && TypeError((error as any).message),
         value,
       ]),
@@ -269,7 +240,7 @@ describe('doTry', () => {
     };
 
     const [error] = await doTry(async () => fn()).then(
-      ([error, value]) =>
+      ([, error, value]) =>
         [error && TypeError((error as any).message), value] as const,
     );
 
@@ -279,9 +250,10 @@ describe('doTry', () => {
 
 describe('safe', () => {
   it('makes promise to resolve with ErrValueTuple when it resolves', async () => {
+    expect.assertions(1);
     const result = await safe(Promise.resolve(42));
 
-    expect(result).toEqual([undefined, 42]);
+    expect(result).toEqual([true, undefined, 42]);
   });
 
   it('returns a correctly typed promise, when it resolves', async () => {
@@ -296,11 +268,16 @@ describe('safe', () => {
   });
 
   it('makes promise to resolve with ErrValueTuple when it rejects', async () => {
+    expect.assertions(1);
     const result = await safe(
       Promise.reject(new Error('Something went wrong')),
     );
 
-    expect(result).toEqual([new Error('Something went wrong'), undefined]);
+    expect(result).toEqual([
+      false,
+      new Error('Something went wrong'),
+      undefined,
+    ]);
   });
 
   it('returns a correctly typed promise, when it only rejects', async () => {
@@ -308,7 +285,7 @@ describe('safe', () => {
     const promise = safe(Promise.reject(new Error('Something went wrong')));
 
     const check: Expect<
-      Equal<typeof promise, Promise<readonly [UnknownError, never]>>
+      Equal<typeof promise, Promise<readonly [false, unknown, never]>>
     > = true;
     expect(check).toBeTruthy();
 
@@ -326,5 +303,109 @@ describe('safe', () => {
     expect(check).toBeTruthy();
 
     await promise;
+  });
+
+  it('example:div', () => {
+    function div(a: number, b: number): number {
+      if (b !== 0) return a / b;
+      if (a !== 0) throw new Error(`Division by Zero`);
+      throw new Error('Indeterminate Form');
+    }
+
+    expect(doTry(() => div(4, 2))).toEqual(success(2));
+
+    expect(doTry(() => div(4, 0))).toEqual(
+      failure(new Error('Division by Zero')),
+    );
+
+    expect(doTry(() => div(0, 0))).toEqual(
+      failure(new Error('Indeterminate Form')),
+    );
+  });
+
+  it('example:div typed ErrValueTuple', () => {
+    function div(a: number, b: number): number {
+      if (b !== 0) return a / b;
+      if (a !== 0) throw new Error(`Division by Zero`);
+      throw new Error('Indeterminate Form');
+    }
+    class DivError extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = 'DivError';
+      }
+    }
+
+    function divWithTypeError(
+      a: number,
+      b: number,
+    ): ErrValueTuple<number, DivError> {
+      const result = doTry(() => div(a, b));
+
+      if (isSuccess(result)) return result;
+      return failure(new DivError('Failed to divide'));
+    }
+
+    const result = divWithTypeError(4, 2);
+    const check: Expect<Equal<typeof result, ErrValueTuple<number, DivError>>> =
+      true;
+    expect(check).toBeTruthy();
+    expect(result).toEqual(success(2));
+  });
+
+  describe('isFailure', () => {
+    it('returns true for a Failure tuple', () => {
+      const result = isFailure([
+        false,
+        new Error('Something went wrong'),
+        undefined,
+      ] as ErrValueTuple<number>);
+      expect(result).toBe(true);
+    });
+
+    it('narrows ErrValueTuple to Failure', () => {
+      expect.assertions(1);
+      const result: ErrValueTuple<number> = [
+        false,
+        new Error('Something went wrong'),
+        undefined,
+      ];
+
+      if (isFailure(result)) {
+        const checkResult: Expect<Equal<typeof result, Failure>> = true;
+        expect(checkResult).toBeTruthy();
+      }
+    });
+
+    it('returns false for a Success tuple', () => {
+      const result = isFailure([true, undefined, 42] as ErrValueTuple<number>);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('isSuccess', () => {
+    it('returns true for a Success tuple', () => {
+      const result = isSuccess([true, undefined, 42] as ErrValueTuple<number>);
+      expect(result).toBe(true);
+    });
+
+    it('narrows ErrValueTuple to Success', () => {
+      expect.assertions(1);
+      const result: ErrValueTuple<number> = [true, undefined, 42];
+
+      if (isSuccess(result)) {
+        const checkResult: Expect<Equal<typeof result, Success<number>>> = true;
+        expect(checkResult).toBeTruthy();
+      }
+    });
+
+    it('returns false for a Failure tuple', () => {
+      const result = isSuccess([
+        false,
+        new Error('Something went wrong'),
+        undefined,
+      ] as ErrValueTuple<number>);
+      expect(result).toBe(false);
+    });
   });
 });
